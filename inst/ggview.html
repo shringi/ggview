@@ -1,293 +1,803 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>ggview</title>
-    <style>
-        /* Reset default margins and paddings */
-        body, html {
-            margin: 0;
-            padding: 0;
-            overflow: hidden; /* Hide scrollbars */
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ggview</title>
+<style>
+/* ══════════════════════════════════════════════════════
+   THEME  —  dark default / .theme-light override
+   Placeholders injected by R before writeLines():
+     {{file}}        basename of the rendered image
+     {{dpi}}         image rendering DPI  (from canvas$dpi)
+     {{monitor_dpi}} monitor physical DPI (empty → CSS 96 px/in)
+     {{scale}}       viewer calibration multiplier (1.0 = none)
+     {{units}}       display units: in | cm | mm | px
+     {{show_ruler}}  true | false
+     {{is_dark}}     true | false  (from rstudioapi or forced theme)
+   ══════════════════════════════════════════════════════ */
+:root {
+  --bg:#1c1c1c; --panel-bg:#252526; --panel-border:#3c3c3c;
+  --text:#cccccc; --text-dim:#666666;
+  --accent:#c8a96e; --accent-dim:#7a6540; --accent-fg:#1c1c1c;
+  --input-bg:#1c1c1c; --checker-a:#2c2c2c; --checker-b:#1e1e1e;
+  --si-bg:rgba(28,28,28,0.9); --seg-act-bg:#3c3c3c;
+}
+:root.theme-light {
+  --bg:#ffffff; --panel-bg:#f3f3f3; --panel-border:#dcdcdc;
+  --text:#3b3b3b; --text-dim:#9a9a9a;
+  --accent:#2563eb; --accent-dim:#1d4ed8; --accent-fg:#ffffff;
+  --input-bg:#ffffff; --checker-a:#d4d4d4; --checker-b:#eaeaea;
+  --si-bg:rgba(243,243,243,0.92); --seg-act-bg:#e2e2e2;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:'Courier New',monospace;font-size:11px;
+  user-select:none;transition:background .15s,color .15s}
 
-        .viewport {
-            width: 100vw; /* Full viewport width */
-            height: 100vh; /* Full viewport height */
-            overflow: hidden; /* Hide overflowing content */
-            position: relative; /* Relative positioning for child elements */
-            background-color: #cccccc; /* Background color */
-            cursor: zoom-in; /* Initial cursor */
-            touch-action: none; /* Prevent default touch actions */
-        }
+/* ── Top bar ────────────────────────────────────────── */
+#topbar{
+  position:fixed;top:0;left:0;right:0;height:34px;
+  background:var(--panel-bg);border-bottom:1px solid var(--panel-border);
+  display:flex;align-items:center;z-index:100}
+.tb-group{display:flex;align-items:center;gap:3px;padding:0 8px;
+  border-right:1px solid var(--panel-border);height:100%}
+.tb-group.fill{flex:1;border-right:none;overflow:hidden}
+.tb-group.right{border-right:none;border-left:1px solid var(--panel-border);
+  margin-left:auto;flex-shrink:0}
+.tb-btn{background:none;border:1px solid transparent;color:var(--text);
+  font-family:'Courier New',monospace;font-size:11px;cursor:pointer;
+  padding:3px 7px;border-radius:2px;line-height:1;white-space:nowrap;
+  transition:border-color .1s,color .1s}
+.tb-btn:hover{border-color:var(--panel-border);color:var(--accent)}
+.tb-btn.active{border-color:var(--accent-dim);color:var(--accent)}
+#zoom-display{color:var(--accent);font-size:12px;font-weight:bold;
+  min-width:52px;text-align:center;letter-spacing:.5px}
+#info-display{color:var(--text-dim);font-size:10px;padding:0 2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-        .content {
-            position: absolute; /* Absolute positioning for dragging */
-            left: 0;
-            top: 0;
-        }
+/* ── Settings panel — compact + scrollable ──────────── */
+#settings-panel{
+  position:fixed;top:35px;right:0;width:216px;
+  max-height:calc(100vh - 45px);overflow-y:auto;overflow-x:hidden;
+  background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
+  border-bottom:1px solid var(--panel-border);
+  padding:8px 10px;z-index:99;
+  display:none;flex-direction:column;gap:5px}
+#settings-panel.open{display:flex}
+#settings-panel::-webkit-scrollbar{width:4px}
+#settings-panel::-webkit-scrollbar-track{background:transparent}
+#settings-panel::-webkit-scrollbar-thumb{background:var(--panel-border);border-radius:2px}
+.sr{display:flex;align-items:center;gap:6px}
+.sl{font-size:9.5px;color:var(--text-dim);text-transform:uppercase;
+  letter-spacing:.6px;min-width:58px;flex-shrink:0;line-height:1.2}
+.seg-row{display:flex;gap:2px;flex:1}
+.seg-btn{flex:1;background:none;border:1px solid var(--panel-border);
+  color:var(--text-dim);font-family:'Courier New',monospace;font-size:10px;
+  cursor:pointer;padding:3px 1px;border-radius:2px;text-align:center;
+  transition:background .1s,color .1s,border-color .1s}
+.seg-btn:hover{border-color:var(--accent-dim);color:var(--text)}
+.seg-btn.active{background:var(--seg-act-bg);border-color:var(--accent-dim);
+  color:var(--accent);font-weight:bold}
+.s-num{flex:1;min-width:0;background:var(--input-bg);border:1px solid var(--panel-border);
+  color:var(--text);font-family:'Courier New',monospace;font-size:11px;
+  padding:3px 5px;border-radius:2px}
+.s-num:focus{outline:none;border-color:var(--accent)}
+.sdiv{border:none;border-top:1px solid var(--panel-border);margin:2px 0}
+.s-footer{display:flex;align-items:center;justify-content:space-between;padding-top:1px}
+.s-apply{background:var(--accent-dim);border:none;color:var(--accent-fg);
+  font-family:'Courier New',monospace;font-size:10px;font-weight:bold;
+  letter-spacing:.5px;text-transform:uppercase;
+  padding:4px 10px;border-radius:2px;cursor:pointer;transition:background .1s}
+.s-apply:hover{background:var(--accent)}
+#theme-status{font-size:9px;color:var(--text-dim);padding-left:64px;
+  margin-top:-1px;line-height:1.3;font-style:italic}
 
-        .content img {
-            display: block; /* Remove extra spacing below image */
-            user-select: none; /* Prevent text selection */
-            -webkit-user-drag: none; /* Prevent image dragging in Safari */
-        }
-    </style>
+/* ── Viewport ───────────────────────────────────────── */
+#viewport{position:fixed;top:34px;left:0;right:0;bottom:0;
+  overflow:hidden;cursor:grab}
+#viewport.grabbing{cursor:grabbing}
+
+/* ── Image + checkerboard ───────────────────────────── */
+#canvas-wrap{position:absolute;top:0;left:0;transform-origin:0 0;
+  background-image:
+    linear-gradient(45deg,var(--checker-a) 25%,transparent 25%),
+    linear-gradient(-45deg,var(--checker-a) 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,var(--checker-a) 75%),
+    linear-gradient(-45deg,transparent 75%,var(--checker-a) 75%);
+  background-size:12px 12px;
+  background-position:0 0,0 6px,6px -6px,-6px 0;
+  background-color:var(--checker-b)}
+#the-image{display:block;image-rendering:auto}
+
+/* ── Ruler overlay (full viewport, single canvas) ───── */
+#ruler-overlay{position:absolute;top:0;left:0;pointer-events:none;display:none}
+
+/* ── Drop zone ──────────────────────────────────────── */
+#drop-zone{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;color:var(--text-dim)}
+#drop-zone.hidden{display:none}
+#drop-zone-inner{border:1px dashed var(--panel-border);
+  padding:28px 40px;text-align:center;border-radius:4px}
+#drop-zone-inner .big{font-size:14px;color:var(--text);margin-bottom:6px}
+#file-input{display:none}
+
+/* ── Size indicator ─────────────────────────────────── */
+#size-indicator{position:fixed;bottom:8px;right:8px;
+  background:var(--si-bg);border:1px solid var(--panel-border);
+  padding:4px 8px;font-size:10px;color:var(--text-dim);
+  pointer-events:none;border-radius:2px;z-index:50}
+#size-indicator.hidden{display:none}
+</style>
 </head>
 <body>
-    <div class="viewport">
-        <div class="content">
-            <img src="{{file}}" alt="Sample Image">
-        </div>
+
+<!-- ══ TOP BAR ══════════════════════════════════════════════ -->
+<div id="topbar">
+  <div class="tb-group">
+    <button class="tb-btn" onclick="resetZoom()" title="100% = physical print size">100%</button>
+    <button class="tb-btn" onclick="fitToWindow()">FIT</button>
+  </div>
+  <div class="tb-group">
+    <button class="tb-btn" onclick="zoomStep(-1)">&#8722;</button>
+    <span id="zoom-display">100%</span>
+    <button class="tb-btn" onclick="zoomStep(+1)">+</button>
+  </div>
+  <div class="tb-group fill">
+    <span id="info-display">no image</span>
+  </div>
+  <div class="tb-group right">
+    <button class="tb-btn" id="settings-btn" onclick="toggleSettings()">&#9881; CONFIG</button>
+    <label class="tb-btn" for="file-input">OPEN</label>
+    <input type="file" id="file-input" accept="image/*" onchange="loadFile(this)">
+  </div>
+</div>
+
+<!-- ══ SETTINGS PANEL ═════════════════════════════════════════ -->
+<div id="settings-panel">
+
+  <div class="sr">
+    <span class="sl">Units</span>
+    <div class="seg-row" id="unit-seg">
+      <button class="seg-btn"        data-unit="px" onclick="setUnit('px')">px</button>
+      <button class="seg-btn active" data-unit="in" onclick="setUnit('in')">in</button>
+      <button class="seg-btn"        data-unit="cm" onclick="setUnit('cm')">cm</button>
+      <button class="seg-btn"        data-unit="mm" onclick="setUnit('mm')">mm</button>
     </div>
-    <script>
-        window.onload = function() {
-            const viewport = document.querySelector('.viewport');
-            const content = document.querySelector('.content');
-            const img = content.querySelector('img');
+  </div>
 
-            let viewportWidth, viewportHeight;
-            let imgNaturalWidth, imgNaturalHeight;
-            const padding = 20;
-            let initialImgWidth, initialImgHeight;
-            let scaledImgWidth, scaledImgHeight;
-            let contentWidth, contentHeight;
+  <div class="sr">
+    <span class="sl">Ruler</span>
+    <div class="seg-row" id="ruler-seg">
+      <button class="seg-btn"        data-ruler="show" onclick="setRuler(true)">Show</button>
+      <button class="seg-btn active" data-ruler="hide" onclick="setRuler(false)">Hide</button>
+    </div>
+  </div>
 
-            let isZoomedIn = false;
+  <hr class="sdiv">
 
-            // Variables for dragging
-            let isDragging = false;
-            let clickPrevented = false;
-            let dragStartX, dragStartY;
-            let contentStartX, contentStartY;
+  <div class="sr">
+    <span class="sl">Img DPI</span>
+    <input class="s-num" id="s-image-dpi" type="number" value="96"
+           min="1" max="9999" step="1" title="DPI the image was rendered at">
+  </div>
+  <div class="sr">
+    <span class="sl">Mon DPI</span>
+    <input class="s-num" id="s-monitor-dpi" type="number" placeholder="auto"
+           min="50" max="600" step="1"
+           title="Monitor physical DPI — blank uses CSS standard 96 px/in">
+  </div>
+  <div class="sr">
+    <span class="sl">Scale</span>
+    <input class="s-num" id="s-scale" type="number" value="1.0"
+           min="0.05" max="10" step="0.01"
+           title="Calibration multiplier: hold a ruler to the screen at 100%, set scale = expected/measured">
+  </div>
 
-            // Wait for the image to load to get its natural dimensions
-            img.onload = function() {
-                initialize();
-            };
+  <hr class="sdiv">
 
-            // If the image is cached and already loaded
-            if (img.complete) {
-                initialize();
-            }
+  <div class="sr">
+    <span class="sl">Theme</span>
+    <div class="seg-row" id="theme-seg">
+      <button class="seg-btn active" data-theme="auto"  onclick="setThemeMode('auto')">Auto</button>
+      <button class="seg-btn"        data-theme="dark"  onclick="setThemeMode('dark')">Dark</button>
+      <button class="seg-btn"        data-theme="light" onclick="setThemeMode('light')">Light</button>
+    </div>
+  </div>
+  <div id="theme-status">Following RStudio theme.</div>
 
-            function initialize() {
-                // Get the natural size of the image
-                imgNaturalWidth = img.naturalWidth;
-                imgNaturalHeight = img.naturalHeight;
+  <hr class="sdiv">
 
-                calculateSizes();
+  <div class="s-footer">
+    <span style="font-size:9px;color:var(--text-dim)">dpr&#160;=&#160;<span id="dpr-display">?</span></span>
+    <button class="s-apply" onclick="applySettings()">&#9654;&#160;Apply</button>
+  </div>
 
-                // Set initial position
-                limitContentPosition();
+</div>
 
-                // Add event listeners
-                addEventListeners();
-            }
+<!-- ══ VIEWPORT ═════════════════════════════════════════════ -->
+<div id="viewport"
+  onmousedown="panStart(event)"
+  onmousemove="panMove(event)"
+  onmouseup="panEnd()"
+  onmouseleave="panEnd()"
+  ondrop="dropFile(event)"
+  ondragover="event.preventDefault()">
 
-            function calculateSizes() {
-                // Get the viewport dimensions
-                viewportWidth = viewport.clientWidth;
-                viewportHeight = viewport.clientHeight;
+  <div id="canvas-wrap">
+    <img id="the-image" draggable="false" src="" alt="">
+  </div>
 
-                // Calculate the maximum size the image can be within the viewport minus padding
-                const maxImgWidth = viewportWidth - padding * 2;
-                const maxImgHeight = viewportHeight - padding * 2;
+  <canvas id="ruler-overlay"></canvas>
 
-                // Calculate aspect ratios
-                const imgAspectRatio = imgNaturalWidth / imgNaturalHeight;
-                const viewportAspectRatio = maxImgWidth / maxImgHeight;
+  <div id="drop-zone">
+    <div id="drop-zone-inner">
+      <div class="big">Drop an image here</div>
+      <div>or click <label for="file-input"
+        style="color:var(--accent);cursor:pointer;text-decoration:underline">OPEN</label></div>
+      <div style="margin-top:12px;font-size:9px;line-height:1.8">
+        100% = physical print size<br>
+        scroll to zoom &nbsp;&#183;&nbsp; drag to pan
+      </div>
+    </div>
+  </div>
+</div>
 
-                if (imgAspectRatio > viewportAspectRatio) {
-                    // Image is wider than viewport
-                    initialImgWidth = maxImgWidth;
-                    initialImgHeight = maxImgWidth / imgAspectRatio;
-                } else {
-                    // Image is taller than viewport
-                    initialImgHeight = maxImgHeight;
-                    initialImgWidth = maxImgHeight * imgAspectRatio;
-                }
+<div id="size-indicator" class="hidden"></div>
 
-                if (isZoomedIn) {
-                    // Scale up the image size by a factor of 2
-                    scaledImgWidth = initialImgWidth * 2;
-                    scaledImgHeight = initialImgHeight * 2;
-                } else {
-                    // Use initial size
-                    scaledImgWidth = initialImgWidth;
-                    scaledImgHeight = initialImgHeight;
-                }
+<script>
+'use strict';
 
-                // Set the size of the content div (image plus padding)
-                contentWidth = scaledImgWidth + padding * 2;
-                contentHeight = scaledImgHeight + padding * 2;
-                content.style.width = contentWidth + 'px';
-                content.style.height = contentHeight + 'px';
+// ════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ════════════════════════════════════════════════════════════════════
+var RULER_SZ   = 20;
+var RULER_FONT = '9px "Courier New",monospace';
 
-                // Set the size of the image
-                img.style.width = scaledImgWidth + 'px';
-                img.style.height = scaledImgHeight + 'px';
+// ════════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════════
+var state = {
+  imageDpi:     96,
+  monitorDpi:   null,
+  scale:        1.0,
+  displayUnits: 'in',
+  themeMode:    'auto',
+  showRuler:    false,
+  imgW:0, imgH:0, cssW100:0, cssH100:0,
+  zoom:1.0, tx:0, ty:0,
+  dragging:false, dragStartX:0, dragStartY:0, dragTx0:0, dragTy0:0,
+  imageLoaded:false
+};
 
-                // Add padding around the image
-                img.style.margin = padding + 'px';
+// ════════════════════════════════════════════════════════════════════
+// THEME
+// Priority: {{is_dark}} R-injected > rstudioTheme JS API >
+//           data-color-scheme attr > html class > OS prefers > light
+// ════════════════════════════════════════════════════════════════════
+function applyThemeClass(isDark) {
+  document.documentElement.classList.toggle('theme-light', !isDark);
+  if (state.imageLoaded) drawOverlay();
+}
+function autoDetectTheme() {
+  if (window.rstudioTheme && typeof window.rstudioTheme.dark === 'boolean') {
+    applyThemeClass(window.rstudioTheme.dark); return true;
+  }
+  var s = document.documentElement.dataset.colorScheme;
+  if (s === 'dark')  { applyThemeClass(true);  return true; }
+  if (s === 'light') { applyThemeClass(false); return true; }
+  if (document.documentElement.classList.contains('dark'))  { applyThemeClass(true);  return true; }
+  if (document.documentElement.classList.contains('light')) { applyThemeClass(false); return true; }
+  if (window.matchMedia) {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches)  { applyThemeClass(true);  return true; }
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) { applyThemeClass(false); return true; }
+  }
+  applyThemeClass(false); // RStudio default is light
+  return false;
+}
+function setThemeMode(mode) {
+  state.themeMode = mode;
+  document.querySelectorAll('#theme-seg .seg-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.theme === mode);
+  });
+  var el = document.getElementById('theme-status');
+  if (mode === 'auto') {
+    el.textContent = autoDetectTheme() ? 'Following RStudio theme.' : 'OS color scheme fallback.';
+  } else {
+    applyThemeClass(mode === 'dark');
+    el.textContent = mode === 'dark' ? 'Dark forced.' : 'Light forced.';
+  }
+}
+new MutationObserver(function() {
+  if (state.themeMode === 'auto') autoDetectTheme();
+}).observe(document.documentElement, {
+  attributes:true, attributeFilter:['class','data-color-scheme','style']
+});
+var _pc = 0, _pt = setInterval(function() {
+  if (++_pc > 8 || state.themeMode !== 'auto') { clearInterval(_pt); return; }
+  autoDetectTheme();
+}, 1000);
 
-                // Adjust content position if it was moved
-                limitContentPosition();
-            }
+// ════════════════════════════════════════════════════════════════════
+// UNIT HELPERS
+// ════════════════════════════════════════════════════════════════════
+var UNIT_DEF = {
+  px:{label:'px', dec:0},
+  in:{label:'in', dec:2, factor:1    },
+  cm:{label:'cm', dec:2, factor:2.54 },
+  mm:{label:'mm', dec:1, factor:25.4 }
+};
+function inchesToDisplay(inches) {
+  var u = UNIT_DEF[state.displayUnits];
+  return state.displayUnits === 'px'
+    ? (inches * state.imageDpi).toFixed(u.dec)
+    : (inches * u.factor).toFixed(u.dec);
+}
+function inchToUnit(inch) {
+  return state.displayUnits === 'px'
+    ? inch * state.imageDpi
+    : inch * UNIT_DEF[state.displayUnits].factor;
+}
+function unitToCssPx(val) {
+  var inches  = state.displayUnits === 'px'
+    ? val / state.imageDpi
+    : val / UNIT_DEF[state.displayUnits].factor;
+  var dpr     = window.devicePixelRatio || 1;
+  var pxPerIn = state.monitorDpi ? state.monitorDpi / dpr : 96;
+  return inches * pxPerIn * state.scale * state.zoom;
+}
+function setUnit(unit) {
+  state.displayUnits = unit;
+  document.querySelectorAll('#unit-seg .seg-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.unit === unit);
+  });
+  updateInfoBar(); updateSizeIndicator();
+  if (state.imageLoaded) drawOverlay();
+}
+function fmtTick(val) {
+  if (state.displayUnits === 'px') return String(Math.round(val));
+  return parseFloat(val.toFixed(UNIT_DEF[state.displayUnits].dec)).toString();
+}
+function niceStep(raw) {
+  if (raw <= 0) return 1;
+  var exp = Math.floor(Math.log10(raw));
+  var f   = raw / Math.pow(10, exp);
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * Math.pow(10, exp);
+}
 
-            function addEventListeners() {
-                // Click to toggle zoom
-                content.addEventListener('click', function(e) {
-                    // Ignore clicks that were part of a drag
-                    if (clickPrevented) {
-                        clickPrevented = false;
-                        return;
-                    }
+// ════════════════════════════════════════════════════════════════════
+// PHYSICAL SIZE
+// CSS spec: 96 CSS px = 1 inch, always.
+// css_px = (img_px / dpi) × pxPerIn × viewer_scale
+// pxPerIn = monitorDpi / devicePixelRatio   (96 if monitorDpi not set)
+// ════════════════════════════════════════════════════════════════════
+function computeCssSize(w, h) {
+  var dpr     = window.devicePixelRatio || 1;
+  var pxPerIn = state.monitorDpi ? state.monitorDpi / dpr : 96;
+  var s       = state.scale / state.imageDpi * pxPerIn;
+  return { cssW: w * s, cssH: h * s };
+}
 
-                    // Calculate click position relative to the content
-                    const rect = content.getBoundingClientRect();
-                    const clickX = e.clientX - rect.left;
-                    const clickY = e.clientY - rect.top;
+// ════════════════════════════════════════════════════════════════════
+// IMAGE LOADING
+// ════════════════════════════════════════════════════════════════════
+function loadImageSrc(src) {
+  if (!src) return;
+  var img = document.getElementById('the-image');
+  img.onload = function() {
+    state.imgW = img.naturalWidth;
+    state.imgH = img.naturalHeight;
+    onImageReady();
+  };
+  img.src = src;
+}
+function loadFile(input) {
+  if (input.files && input.files[0]) loadImageSrc(URL.createObjectURL(input.files[0]));
+}
+function dropFile(e) {
+  e.preventDefault();
+  var f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadImageSrc(URL.createObjectURL(f));
+}
+function onImageReady() {
+  state.imageLoaded = true;
+  document.getElementById('drop-zone').classList.add('hidden');
+  document.getElementById('size-indicator').classList.remove('hidden');
+  var sz = computeCssSize(state.imgW, state.imgH);
+  state.cssW100 = sz.cssW; state.cssH100 = sz.cssH;
+  var img  = document.getElementById('the-image');
+  var wrap = document.getElementById('canvas-wrap');
+  img.style.width  = wrap.style.width  = sz.cssW + 'px';
+  img.style.height = wrap.style.height = sz.cssH + 'px';
+  state.zoom = 1.0;
+  var vp = document.getElementById('viewport');
+  state.tx = Math.max(0, (vp.clientWidth  - sz.cssW) / 2);
+  state.ty = Math.max(0, (vp.clientHeight - sz.cssH) / 2);
+  applyTransform(); updateInfoBar();
+}
 
-                    // Calculate click position ratio
-                    const clickXRatio = clickX / contentWidth;
-                    const clickYRatio = clickY / contentHeight;
+// ════════════════════════════════════════════════════════════════════
+// TRANSFORM / ZOOM / PAN
+// ════════════════════════════════════════════════════════════════════
+function applyTransform() {
+  document.getElementById('canvas-wrap').style.transform =
+    'translate('+state.tx+'px,'+state.ty+'px) scale('+state.zoom+')';
+  document.getElementById('zoom-display').textContent =
+    (state.zoom*100).toFixed(1).replace(/\.0$/,'') + '%';
+  updateSizeIndicator(); drawOverlay();
+}
 
-                    // Toggle zoom state
-                    isZoomedIn = !isZoomedIn;
+var ZOOM_STEPS = [
+  0.05,0.08,0.1,0.125,0.167,0.2,0.25,0.333,
+  0.5,0.667,0.75,0.9,1.0,1.25,1.5,2.0,3.0,4.0,6.0,8.0,12.0,16.0
+];
+function zoomAround(nz, cx, cy) {
+  if (!state.imageLoaded) return;
+  nz = Math.max(0.02, Math.min(32, nz));
+  var ox = (cx - state.tx) / state.zoom, oy = (cy - state.ty) / state.zoom;
+  state.zoom = nz; state.tx = cx - ox * nz; state.ty = cy - oy * nz;
+  applyTransform();
+}
+document.getElementById('viewport').addEventListener('wheel', function(e) {
+  e.preventDefault();
+  if (!state.imageLoaded) return;
+  var r = this.getBoundingClientRect();
+  zoomAround(state.zoom * (e.deltaY < 0 ? 1.08 : 1/1.08),
+             e.clientX - r.left, e.clientY - r.top);
+}, { passive:false });
+function zoomStep(dir) {
+  if (!state.imageLoaded) return;
+  var vp = document.getElementById('viewport');
+  var cx = vp.clientWidth/2, cy = vp.clientHeight/2;
+  if (dir > 0) {
+    var a = ZOOM_STEPS.filter(function(z){ return z > state.zoom * 1.01; });
+    zoomAround(a.length ? a[0] : state.zoom*1.5, cx, cy);
+  } else {
+    var b = ZOOM_STEPS.filter(function(z){ return z < state.zoom * 0.99; });
+    zoomAround(b.length ? b[b.length-1] : state.zoom/1.5, cx, cy);
+  }
+}
+function resetZoom() {
+  if (!state.imageLoaded) return;
+  var sz = computeCssSize(state.imgW, state.imgH);
+  state.cssW100 = sz.cssW; state.cssH100 = sz.cssH;
+  var img  = document.getElementById('the-image');
+  var wrap = document.getElementById('canvas-wrap');
+  img.style.width  = wrap.style.width  = sz.cssW + 'px';
+  img.style.height = wrap.style.height = sz.cssH + 'px';
+  state.zoom = 1.0;
+  var vp = document.getElementById('viewport');
+  state.tx = Math.max(0, (vp.clientWidth  - sz.cssW) / 2);
+  state.ty = Math.max(0, (vp.clientHeight - sz.cssH) / 2);
+  applyTransform();
+}
+function fitToWindow() {
+  if (!state.imageLoaded) return;
+  var vp = document.getElementById('viewport');
+  var z  = Math.min((vp.clientWidth-48)/state.cssW100, (vp.clientHeight-48)/state.cssH100);
+  state.zoom = z;
+  state.tx = (vp.clientWidth  - state.cssW100*z) / 2;
+  state.ty = (vp.clientHeight - state.cssH100*z) / 2;
+  applyTransform();
+}
+function panStart(e) {
+  if (e.button !== 0) return;
+  state.dragging = true;
+  state.dragStartX = e.clientX; state.dragStartY = e.clientY;
+  state.dragTx0 = state.tx; state.dragTy0 = state.ty;
+  document.getElementById('viewport').classList.add('grabbing');
+}
+function panMove(e) {
+  if (!state.dragging) return;
+  state.tx = state.dragTx0 + e.clientX - state.dragStartX;
+  state.ty = state.dragTy0 + e.clientY - state.dragStartY;
+  applyTransform();
+}
+function panEnd() {
+  state.dragging = false;
+  document.getElementById('viewport').classList.remove('grabbing');
+}
 
-                    // Change cursor style
-                    if (isZoomedIn) {
-                        viewport.style.cursor = 'zoom-out';
-                    } else {
-                        viewport.style.cursor = 'zoom-in';
-                    }
+// ════════════════════════════════════════════════════════════════════
+// OVERLAY — infinite rulers + image boundary lines
+//
+// Single full-viewport canvas, cleared and redrawn every frame.
+//
+// H ruler: strip at y = imgBot spanning full viewport width.
+//   Origin u=0 at x=imgL. Positive u → right, negative → left.
+//   Tick canvas-x = imgL + u × cssPxPerUnit
+//
+// V ruler: strip at x = [imgL−RS, imgL] spanning full viewport height.
+//   Origin u=0 at y=imgBot. Positive u → up (towards top of image).
+//   Tick canvas-y = imgBot − u × cssPxPerUnit
+//
+// Boundary lines: faint full-span lines at all four image edges.
+// Both ruled strips use 10% opaque background.
+// Labels use shadow halos for legibility on any theme.
+// ════════════════════════════════════════════════════════════════════
+function setRuler(show) {
+  state.showRuler = show;
+  document.querySelectorAll('#ruler-seg .seg-btn').forEach(function(b) {
+    b.classList.toggle('active', (b.dataset.ruler === 'show') === show);
+  });
+  drawOverlay();
+}
 
-                    // Recalculate sizes
-                    calculateSizes();
+function drawOverlay() {
+  var canvas = document.getElementById('ruler-overlay');
+  var vp     = document.getElementById('viewport');
+  var vpW    = vp.clientWidth;
+  var vpH    = vp.clientHeight;
+  var dpr    = window.devicePixelRatio || 1;
+  var needW  = Math.round(vpW * dpr), needH = Math.round(vpH * dpr);
+  if (canvas.width !== needW || canvas.height !== needH) {
+    canvas.width  = needW; canvas.height  = needH;
+    canvas.style.width  = vpW + 'px'; canvas.style.height = vpH + 'px';
+  }
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, vpW, vpH);
 
-                    // Adjust content position to focus on clicked point
-                    // Calculate new content position so that the clicked point remains under the cursor
-                    const newContentLeft = viewportWidth / 2 - clickXRatio * contentWidth;
-                    const newContentTop = viewportHeight / 2 - clickYRatio * contentHeight;
+  if (!state.imageLoaded || !state.showRuler) {
+    canvas.style.display = 'none'; return;
+  }
+  canvas.style.display = 'block';
 
-                    // Set the content position
-                    content.style.left = newContentLeft + 'px';
-                    content.style.top = newContentTop + 'px';
+  var isDark  = !document.documentElement.classList.contains('theme-light');
+  var bgCol   = isDark ? 'rgba(12,12,12,0.10)'    : 'rgba(248,248,248,0.10)';
+  var tickCol = isDark ? 'rgba(160,160,160,0.75)' : 'rgba(90,90,90,0.75)';
+  var txtCol  = isDark ? '#ebebeb'                 : '#111111';
+  var shdCol  = isDark ? 'rgba(0,0,0,0.96)'        : 'rgba(255,255,255,0.96)';
+  var origCol = isDark ? '#c8a96e'                 : '#2563eb';
+  var bndCol  = isDark ? 'rgba(200,169,110,0.13)'  : 'rgba(37,99,235,0.13)';
 
-                    // Limit the content position to stay within bounds
-                    limitContentPosition();
+  var rendW  = state.cssW100 * state.zoom;
+  var rendH  = state.cssH100 * state.zoom;
+  var imgL   = state.tx;
+  var imgT   = state.ty;
+  var imgR   = state.tx + rendW;
+  var imgBot = state.ty + rendH;
+  var cpp    = unitToCssPx(1);
+  var RS     = RULER_SZ;
 
-                    e.stopPropagation(); // Prevent event from bubbling up
-                });
+  var majStep = niceStep(55 / cpp);
+  var minStep = majStep / 5;
+  var useMin  = (minStep * cpp) >= 4;
+  var unitLabel = UNIT_DEF[state.displayUnits].label;
 
-                // Dragging functionality
-                content.addEventListener('mousedown', function(e) {
-                    if (isZoomedIn) {
-                        isDragging = true;
-                        clickPrevented = false;
-                        dragStartX = e.clientX;
-                        dragStartY = e.clientY;
-                        contentStartX = parseFloat(content.style.left) || 0;
-                        contentStartY = parseFloat(content.style.top) || 0;
-                        viewport.style.cursor = 'grabbing';
-                        e.preventDefault(); // Prevent text selection
-                        e.stopPropagation(); // Prevent event from bubbling up
-                    }
-                });
+  // ── Boundary lines ────────────────────────────────────
+  ctx.save();
+  ctx.strokeStyle = bndCol; ctx.lineWidth = 1;
+  function vLine(x) {
+    if (x > 0 && x < vpW) { ctx.beginPath(); ctx.moveTo(x+.5,0); ctx.lineTo(x+.5,vpH); ctx.stroke(); }
+  }
+  function hLine(y) {
+    if (y > 0 && y < vpH) { ctx.beginPath(); ctx.moveTo(0,y+.5); ctx.lineTo(vpW,y+.5); ctx.stroke(); }
+  }
+  vLine(imgL); vLine(imgR); hLine(imgT); hLine(imgBot);
+  ctx.restore();
 
-                document.addEventListener('mousemove', function(e) {
-                    if (isDragging && isZoomedIn) {
-                        const deltaX = e.clientX - dragStartX;
-                        const deltaY = e.clientY - dragStartY;
+  // ── Horizontal ruler ──────────────────────────────────
+  var hShow = imgBot >= 0 && imgBot < vpH;
+  if (hShow) {
+    ctx.fillStyle = bgCol; ctx.fillRect(0, imgBot, vpW, RS);
+    ctx.strokeStyle = tickCol; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, imgBot+.5); ctx.lineTo(vpW, imgBot+.5); ctx.stroke();
 
-                        // If mouse moved significantly, set clickPrevented to true
-                        if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
-                            clickPrevented = true;
-                        }
+    var huMin = Math.floor((-imgL/cpp)/minStep-1)*minStep;
+    var huMax = Math.ceil(((vpW-imgL)/cpp)/minStep+1)*minStep;
+    if (useMin) {
+      ctx.strokeStyle = tickCol; ctx.lineWidth = 0.75;
+      for (var u = huMin; u <= huMax; u += minStep) {
+        var cx = imgL + u*cpp;
+        if (cx<0||cx>vpW) continue;
+        ctx.beginPath(); ctx.moveTo(cx+.5,imgBot+1); ctx.lineTo(cx+.5,imgBot+1+RS*0.28); ctx.stroke();
+      }
+    }
+    ctx.font = RULER_FONT;
+    var humMin = Math.floor((-imgL/cpp)/majStep-1)*majStep;
+    var humMax = Math.ceil(((vpW-imgL)/cpp)/majStep+1)*majStep;
+    var ulbW   = ctx.measureText(unitLabel).width + 8;
+    for (var u = humMin; u <= humMax; u += majStep) {
+      var cx = imgL + u*cpp;
+      if (cx<-2||cx>vpW+2) continue;
+      var isO = Math.abs(u) < majStep*0.001;
+      ctx.strokeStyle = isO ? origCol : tickCol; ctx.lineWidth = isO ? 1.5 : 1;
+      ctx.beginPath(); ctx.moveTo(cx+.5,imgBot+1); ctx.lineTo(cx+.5,imgBot+1+RS*0.55); ctx.stroke();
+      var lbl = fmtTick(u), lw = ctx.measureText(lbl).width, lx = cx - lw/2;
+      if (lx < 1 || lx+lw > vpW-ulbW) continue;
+      ctx.shadowColor = shdCol; ctx.shadowBlur = 3;
+      ctx.fillStyle = isO ? origCol : txtCol; ctx.textBaseline = 'bottom';
+      ctx.fillText(lbl, lx, imgBot+RS-2);
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+    }
+    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.shadowColor = shdCol; ctx.shadowBlur = 3;
+    ctx.fillStyle = origCol;
+    ctx.fillText(unitLabel, vpW-3, imgBot+RS-2);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+    ctx.textAlign = 'left';
+  }
 
-                        let newLeft = contentStartX + deltaX;
-                        let newTop = contentStartY + deltaY;
+  // ── Vertical ruler ────────────────────────────────────
+  var vRight = imgL;
+  var vLeft  = Math.max(imgL - RS, 0);
+  var vW     = vRight - vLeft;
+  var vShow  = vW > 0 && imgL <= vpW;
+  if (vShow) {
+    ctx.fillStyle = bgCol; ctx.fillRect(vLeft, 0, vW, vpH);
+    ctx.strokeStyle = tickCol; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(imgL-.5,0); ctx.lineTo(imgL-.5,vpH); ctx.stroke();
 
-                        // Limit the dragging to the bounds of the content
-                        limitContentPosition(newLeft, newTop);
-                    }
-                });
+    var vuMin = Math.floor(((imgBot-vpH)/cpp)/minStep-1)*minStep;
+    var vuMax = Math.ceil((imgBot/cpp)/minStep+1)*minStep;
+    if (useMin) {
+      ctx.strokeStyle = tickCol; ctx.lineWidth = 0.75;
+      for (var u = vuMin; u <= vuMax; u += minStep) {
+        var cy = imgBot - u*cpp;
+        if (cy<0||cy>vpH) continue;
+        ctx.beginPath(); ctx.moveTo(imgL-1,cy+.5); ctx.lineTo(imgL-1-vW*0.28,cy+.5); ctx.stroke();
+      }
+    }
+    ctx.font = RULER_FONT;
+    var vumMin = Math.floor(((imgBot-vpH)/cpp)/majStep-1)*majStep;
+    var vumMax = Math.ceil((imgBot/cpp)/majStep+1)*majStep;
+    for (var u = vumMin; u <= vumMax; u += majStep) {
+      var cy = imgBot - u*cpp;
+      if (cy<-2||cy>vpH+2) continue;
+      var isO = Math.abs(u) < majStep*0.001;
+      ctx.strokeStyle = isO ? origCol : tickCol; ctx.lineWidth = isO ? 1.5 : 1;
+      ctx.beginPath(); ctx.moveTo(imgL-1,cy+.5); ctx.lineTo(imgL-1-vW*0.55,cy+.5); ctx.stroke();
+      if (vW >= 10) {
+        var lbl = fmtTick(u);
+        ctx.save();
+        ctx.translate(vLeft + vW*0.46, cy);
+        ctx.rotate(-Math.PI/2);
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.shadowColor = shdCol; ctx.shadowBlur = 3;
+        ctx.fillStyle = isO ? origCol : txtCol;
+        ctx.fillText(lbl, 0, 1);
+        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+    }
+  }
 
-                document.addEventListener('mouseup', function() {
-                    if (isDragging) {
-                        isDragging = false;
-                        viewport.style.cursor = isZoomedIn ? 'zoom-out' : 'zoom-in';
-                    }
-                });
+  // ── Corner fill ───────────────────────────────────────
+  if (hShow && vShow) { ctx.fillStyle = bgCol; ctx.fillRect(vLeft, imgBot, vW, RS); }
+}
 
-                // Prevent image dragging default behavior
-                img.addEventListener('dragstart', function(e) {
-                    e.preventDefault();
-                });
+// ════════════════════════════════════════════════════════════════════
+// DISPLAY HELPERS
+// ════════════════════════════════════════════════════════════════════
+function updateInfoBar() {
+  if (!state.imageLoaded) return;
+  var iW = inchesToDisplay(state.imgW / state.imageDpi);
+  var iH = inchesToDisplay(state.imgH / state.imageDpi);
+  var ul = UNIT_DEF[state.displayUnits].label;
+  document.getElementById('info-display').textContent =
+    state.imgW+'\u00d7'+state.imgH+'px \u00b7 '+
+    state.imageDpi+'dpi \u00b7 '+iW+'\u00d7'+iH+'\u00a0'+ul;
+}
+function updateSizeIndicator() {
+  if (!state.imageLoaded) return;
+  var iW = inchesToDisplay(state.imgW / state.imageDpi * state.zoom);
+  var iH = inchesToDisplay(state.imgH / state.imageDpi * state.zoom);
+  var ul = UNIT_DEF[state.displayUnits].label;
+  document.getElementById('size-indicator').textContent =
+    iW+' \u00d7 '+iH+'\u00a0'+ul+'  at  '+(state.zoom*100).toFixed(1)+'%';
+}
 
-                // Touchpad scrolling (wheel event)
-                viewport.addEventListener('wheel', function(e) {
-                    if (isZoomedIn) {
-                        e.preventDefault(); // Prevent default scrolling
-                        const deltaX = -e.deltaX;
-                        const deltaY = -e.deltaY;
-                        let currentLeft = parseFloat(content.style.left) || 0;
-                        let currentTop = parseFloat(content.style.top) || 0;
-                        let newLeft = currentLeft + deltaX;
-                        let newTop = currentTop + deltaY;
+// ════════════════════════════════════════════════════════════════════
+// SETTINGS
+// ════════════════════════════════════════════════════════════════════
+function toggleSettings() {
+  document.getElementById('settings-panel').classList.toggle('open');
+  document.getElementById('settings-btn').classList.toggle('active');
+}
+function closeSettings() {
+  document.getElementById('settings-panel').classList.remove('open');
+  document.getElementById('settings-btn').classList.remove('active');
+}
+function applySettings() {
+  var dpi   = parseFloat(document.getElementById('s-image-dpi').value);
+  var mDpi  = document.getElementById('s-monitor-dpi').value;
+  var scale = parseFloat(document.getElementById('s-scale').value);
+  if (dpi   > 0) state.imageDpi  = dpi;
+  if (scale > 0) state.scale     = scale;
+  state.monitorDpi = mDpi ? parseFloat(mDpi) : null;
+  if (state.imageLoaded) {
+    var sz   = computeCssSize(state.imgW, state.imgH);
+    state.cssW100 = sz.cssW; state.cssH100 = sz.cssH;
+    var img  = document.getElementById('the-image');
+    var wrap = document.getElementById('canvas-wrap');
+    img.style.width  = wrap.style.width  = sz.cssW + 'px';
+    img.style.height = wrap.style.height = sz.cssH + 'px';
+    var vp = document.getElementById('viewport');
+    state.tx = Math.max(0, (vp.clientWidth  - sz.cssW * state.zoom) / 2);
+    state.ty = Math.max(0, (vp.clientHeight - sz.cssH * state.zoom) / 2);
+    applyTransform(); updateInfoBar();
+  }
+  closeSettings();
+}
 
-                        // Limit the dragging to the bounds of the content
-                        limitContentPosition(newLeft, newTop);
-                    }
-                }, { passive: false });
+// ════════════════════════════════════════════════════════════════════
+// KEYBOARD
+// ════════════════════════════════════════════════════════════════════
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT') return;
+  if      (e.key==='0'||e.key==='Home') resetZoom();
+  else if (e.key==='f'||e.key==='F')    fitToWindow();
+  else if (e.key==='+'||e.key==='=')    zoomStep(+1);
+  else if (e.key==='-')                 zoomStep(-1);
+  else if (e.key==='r'||e.key==='R')    setRuler(!state.showRuler);
+  else if (e.key==='Escape')            closeSettings();
+});
+document.getElementById('viewport').addEventListener('dblclick', function() {
+  Math.abs(state.zoom-1.0) < 0.02 ? fitToWindow() : resetZoom();
+});
+window.addEventListener('resize', function() {
+  if (state.imageLoaded) drawOverlay();
+});
 
-                // Recalculate sizes on window resize
-                window.addEventListener('resize', function() {
-                    calculateSizes();
-                });
-            }
+// ════════════════════════════════════════════════════════════════════
+// INIT
+// R injects values into {{placeholder}} strings via gsub(fixed=TRUE).
+// A placeholder has been substituted when it no longer starts with "{{".
+// URL params provide a browser-only testing fallback.
+// ════════════════════════════════════════════════════════════════════
+(function init() {
+  document.getElementById('dpr-display').textContent =
+    (window.devicePixelRatio||1).toFixed(2);
 
-            function limitContentPosition(newLeft = null, newTop = null) {
-                if (newLeft === null) {
-                    newLeft = parseFloat(content.style.left) || 0;
-                }
-                if (newTop === null) {
-                    newTop = parseFloat(content.style.top) || 0;
-                }
+  var R_file        = '{{file}}';
+  var R_dpi         = '{{dpi}}';
+  var R_monitor_dpi = '{{monitor_dpi}}';
+  var R_scale       = '{{scale}}';
+  var R_units       = '{{units}}';
+  var R_show_ruler  = '{{show_ruler}}';
+  var R_is_dark     = '{{is_dark}}';
 
-                let maxLeft, minLeft, maxTop, minTop;
+  function fromR(s) { return (s && !s.startsWith('{{')) ? s.trim() : null; }
 
-                // Horizontal limits
-                if (contentWidth <= viewportWidth) {
-                    // Content is smaller than viewport width, center it
-                    minLeft = maxLeft = (viewportWidth - contentWidth) / 2;
-                } else {
-                    // Content is wider, can be dragged
-                    maxLeft = 0;
-                    minLeft = viewportWidth - contentWidth;
-                }
+  var P     = new URLSearchParams(window.location.search);
+  var fromP = function(k) { return P.get(k); };
 
-                // Vertical limits
-                if (contentHeight <= viewportHeight) {
-                    // Content is smaller than viewport height, center it
-                    minTop = maxTop = (viewportHeight - contentHeight) / 2;
-                } else {
-                    // Content is taller, can be dragged
-                    maxTop = 0;
-                    minTop = viewportHeight - contentHeight;
-                }
+  var file       = fromR(R_file)        || fromP('file');
+  var dpi        = fromR(R_dpi)         || fromP('dpi');
+  var monitorDpi = fromR(R_monitor_dpi) || fromP('monitor_dpi');
+  var scale      = fromR(R_scale)       || fromP('scale');
+  var units      = fromR(R_units)       || fromP('units');
+  var showRuler  = fromR(R_show_ruler)  || fromP('show_ruler');
+  var isDark     = fromR(R_is_dark)     || fromP('is_dark');
 
-                // Clamp the position values
-                if (newLeft > maxLeft) newLeft = maxLeft;
-                if (newLeft < minLeft) newLeft = minLeft;
-                if (newTop > maxTop) newTop = maxTop;
-                if (newTop < minTop) newTop = minTop;
+  if (dpi)        state.imageDpi     = parseFloat(dpi);
+  if (monitorDpi) state.monitorDpi   = parseFloat(monitorDpi);
+  if (scale)      state.scale        = parseFloat(scale);
+  if (units)      state.displayUnits = units;
+  if (showRuler)  state.showRuler    = showRuler === 'true';
 
-                content.style.left = newLeft + 'px';
-                content.style.top = newTop + 'px';
-            }
-        };
-    </script>
+  // Sync UI controls
+  document.getElementById('s-image-dpi').value = state.imageDpi;
+  if (state.monitorDpi)
+    document.getElementById('s-monitor-dpi').value = state.monitorDpi;
+  document.getElementById('s-scale').value = state.scale;
+  setUnit(state.displayUnits);
+  document.querySelectorAll('#ruler-seg .seg-btn').forEach(function(b) {
+    b.classList.toggle('active', (b.dataset.ruler === 'show') === state.showRuler);
+  });
+
+  // Theme — R-injected value takes priority over auto-detection
+  if (isDark !== null) {
+    applyThemeClass(isDark === 'true');
+    document.getElementById('theme-status').textContent = 'Set by R at render time.';
+  } else {
+    autoDetectTheme();
+  }
+
+  if (file) loadImageSrc(file);
+})();
+</script>
 </body>
 </html>
